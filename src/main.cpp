@@ -85,8 +85,11 @@ int main() {
         string event = j[0].get<string>();
         if (event == "telemetry") {
           // j[1] is the data JSON object
+          // waypoints in map space
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
+
+          // current state
           double px = j[1]["x"];
           double py = j[1]["y"];
           double psi = j[1]["psi"];
@@ -98,8 +101,45 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+
+          // declare vector for storing waypoints in vehicle coordinates
+          vector<double> veh_x(ptsx.size());
+          vector<double> veh_y(ptsy.size());
+
+          // With guidance by classmates on Slack
+          // Transformation from map space to car space (clockwise rotation) because psi is negative value when turning left
+          // (tx,ty) is position of car in map space, (x,y) is point in map space:
+          // x'= (x-tx)*cos(a) + (y-ty)*sin(a)
+          // y'= -(x-tx)*sin(a) + (y-ty)*cos(a)
+
+          for (int i = 0; i < ptsx.size(); i++) {
+            // find waypoints x and y, taking vehicle as origin (vehicle coordinate)
+            double x = ptsx[i] - px;
+            double y = ptsy[i] - py;
+            // transformation for vehicle coordinate
+            veh_x[i] = x * cos(psi) + y * sin(psi);
+            veh_y[i] = - x * sin(psi) + y * cos(psi);
+          }
+          
+          // estimate the track as a 3rd polynomial
+          // convert vector to Eigen vector
+          Eigen::Map<Eigen::VectorXd> new_x(&veh_x[0], veh_x.size());
+          Eigen::Map<Eigen::VectorXd> new_y(&veh_y[0], veh_y.size());
+          auto coeffs = polyfit(new_x, new_y, 3);
+
+          // estimate error
+          double cte = polyeval(coeffs, 0);
+          double epsi = atan(coeffs[1]);
+
+          Eigen::VectorXd state(6);
+
+          // vehicle state will always be in x=0, y=0, psi=0, v, cte, epsi
+          state << 0.0, 0.0, 0.0, v, cte, epsi;
+          
+          auto actuator = mpc.Solve(state, coeffs);
+
+          double steer_value = -actuator[0];
+          double throttle_value = actuator[1];
 
           json msgJson;
           msgJson["steering_angle"] = steer_value;
@@ -112,15 +152,24 @@ int main() {
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
+          double N = actuator[2];
+
+          for (int i = 0; i < N-1; i++) {
+            mpc_x_vals.push_back(actuator[3 + i]);
+            mpc_y_vals.push_back(actuator[3 + i + N]);
+          }
+
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
-          //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+          ///Display the waypoints/reference line
+          vector<double> next_x_vals = veh_x;
+          vector<double> next_y_vals = veh_y;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
+          
+          /////// assigned above when initializing next_x_vals and next_y_vals
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;

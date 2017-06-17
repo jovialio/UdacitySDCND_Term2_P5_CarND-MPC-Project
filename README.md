@@ -3,6 +3,98 @@ Self-Driving Car Engineer Nanodegree Program
 
 ---
 
+## Model Implementation
+
+The model used in the implementation is the Kinematic Model from Udacity Course.
+
+Kinematic models are simplifications of dynamic models that ignore tire forces, gravity, and mass. The accuracy of the model is reduced but it is also more tractable. As the simulation was done in fairly low speeds, kinematic models often approximate the actual vehicle dynamics.
+
+The kinematic model is based on the following state [x,y,ψ,v].
+
+![State Model](./images/70edd3ab-56b9-466e-9889-a8d3e4b8d4c8.png)
+
+On top of the 4 states mentioned, additional cross track error (cte) and bearing difference wrt waypoints (epsi) were also added to give the final state of [x,y,ψ,v,cte,epsi].
+
+For actuation, [δ,a] where δ represents steering and a represents throttle are output. Both these values are limited [-1,1].
+
+In terms of update equations, the following equations were use to update [x,y,ψ,v,cte,epsi]
+
+```
+x_[t+1] = x[t] + v[t] * cos(psi[t]) * dt
+y_[t+1] = y[t] + v[t] * sin(psi[t]) * dt
+psi_[t+1] = psi[t] + v[t] / Lf * delta[t] * dt
+v_[t+1] = v[t] + a[t] * dt
+cte[t+1] = f(x[t]) - y[t] + v[t] * sin(epsi[t]) * dt
+epsi[t+1] = psi[t] - psides[t] + v[t] * delta[t] / Lf * dt
+
+```
+One point to note here is that information passed from simulator is given in terms of map space and rotation have to be carried out to map the information to car space before utilizing the values for calculation.
+
+Detailed explanation of the above equations and its derivation is based from Lesson 18: Vehicle Models and shall not be futher explained.
+
+---
+
+## Timestep Length and Elapsed Duration (N and dt)
+
+### T Value
+
+T value is the value taken by multiplying number of time steps (N) and time step (dt). T value therefore allows the vehicle to predict seconds into the future in terms of the route to take and this value should not be more than a few seconds as it will not make sense to predict beyond what it can see.
+
+### Number of time steps N
+
+The value of N is the major driver of computational cost of the Model Predictive Control. If there are more time steps to predict, the model will have to optimize the control inputs [δ,a] to fit more points while achieving lowest cost of error. 
+
+
+### Time step dt
+
+Model Predictive Control attempts to approximate a continues reference trajectory by means of discrete paths between actuations. Large dt results in less frequent actuations, and hence unable to accurately approximate a 
+continuous reference trajectory. This is sometimes called "discretization error".
+
+
+At a speed of 40MPH, N = 10 and dt = 0.05 with a forward looking time of 0.5seconds was found to be a good value to minimize computation resource while achieving a smooth driving. An earlier value of N = 25 and dt = 0.05 was used but was found to be more computationally intensive while achieving similar results to N =10.
+
+---
+
+## Polynomial Fitting and MPC Preprocessing
+
+The simulator provides 6 waypoints in terms of `ptsx` and `ptsy`, the vehicle `x` and `y` map position, orientation `psi`and vehicle `speed`. These values are pass to the program in map space and hence each of these values have to be converted to vehicle space. When converted to vehicle space, it will result in vehicle `x`, `y` and `psi` values to be 0.
+
+By converting to vehicle space and taking the vehicle as the origin, the values `x`, `y` and `psi` used in the optimization will be closer to 0 and hence likely result in faster optimization instead of working with large `x`, `y` and `psi` in map space.
+
+`ptsx` and `ptsy` that have been converted to vehicle space are used for polynomial fitting and is used to compute cross track error and bearing error
+
+```
+double cte = polyeval(coeffs, 0);
+double epsi = atan(coeffs[1]);
+```
+
+---
+
+## Model Predictive Control with Latency
+
+In a real car, an actuation command won't execute instantly due to delays in command propagation. This is known as latency. The value of a Model Predictive Controller compared to a PID controller is therefore its ability to adapt to the latency in the system. 
+
+In the simulator, a delays of 100 milliseconds was introduced to simulate a more realistic environment. 
+
+To overcome the latency issue, the following points were considered.
+
+- To overcome the 100ms of latency, prediction have to look ahead by more than 100ms. In my case, a prediction that looks ahead by 500ms was used as mentioned in the above section to get the car onto the planned waypoints.
+- dt was kept to small 50ms such that even with the 100ms latency, the same actuator and steering value input calculated was still relevant to get the vehicle back on track.
+- Further tuning of weights for the cost function was also consider to prioritize for the vehicle what was more important in the optimization function. The final values were achieved by trial and error which i believe can be further improved for higher speeds
+  - Weights for `cte` and `epsi` were given 2 to ensure vehicle was able to stay on track
+  - Weight for velocity `v` was given 1 as liberty was given for the vehicle to accelerate/decelerate to stay on track
+  - Weight for steering actuation was given 100 to limit the amount of steering input. Too small a value tended to result in oscillation as steering input was large.
+  - Weight for accelerator actuation was given 1 to allow vehicle the liberty to accelerate or decelerate.
+  - Weight for rate of steering actuation was given 100 to smoothen steering inputs
+  - Weight for rate of acceleration was given 1 to allow vehicle the liberty to accelerate or decelerate.
+
+---
+
+## Results
+
+[![Simulation Results](https://img.youtube.com/vi/92qAeBeYs_Q/0.jpg)](https://youtu.be/92qAeBeYs_Q)
+---
+
 ## Dependencies
 
 * cmake >= 3.5
